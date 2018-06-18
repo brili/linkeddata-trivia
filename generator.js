@@ -1,13 +1,14 @@
 'use strict';
 
 const SPARQL_ENDPOINT = 'http://dbpedia.org/sparql',
-    RANKING_ENDPOINT = 'http://80.241.215.122:8899/api/ranking';
+    RANKING_ENDPOINT = 'http://212.47.248.93:8080/api/ranking';
 
 const SparqlClient = require('sparql-client'),
     client = new SparqlClient(SPARQL_ENDPOINT),
     fs = require('fs'),
     path = require('path'),
     request = require('request-promise'),
+    trends = require('google-trends'),
     _ = require('lodash'),
     moment = require('moment');
 
@@ -20,7 +21,7 @@ const blacklist = JSON.parse(fs.readFileSync(path.normalize('./resources/blackli
 let numTotalEntities = _.keys(sortedClasses).reduce((acc, val) => acc + sortedClasses[val], 0);
 
 /* Currently only supports to generate 1 question at a time. */
-function generateQuestions(num, startTime, retries) {
+function generateQuestions(num, startTime, retries, trends) {
     /* 
     Step 1: Get random entity from DBPedia
     Step 2: Get entity label    
@@ -34,11 +35,21 @@ function generateQuestions(num, startTime, retries) {
     let propertyInfos = {};
     let entity = null;
     let entityLabel = '';
+    let trend = null;
 
     if (!startTime) startTime = moment();
     if (!retries) retries = 0;
 
-    return fetchRandomEntity()
+    if(trends.length > num - 1){
+        trend = trends[num-1];
+    } else{
+        console.log("dbpedia query returned empty result");
+        return;
+    }
+
+    //crossword = 5x5
+
+    return fetchEntityByKeyword(trend)
         .then(e => { entity = e; })
         .then(() => fetchLabel(entity))
         .then(label => { entityLabel = label; })
@@ -66,24 +77,110 @@ function generateQuestions(num, startTime, retries) {
         .then(() => {
             console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
             let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
-            return {
+            let r = {
                 q: `What is the ${prop.label} of ${entityLabel}?`,
                 correctAnswer: prop.correctAnswer,
                 alternativeAnswers: prop.alternativeAnswers,
                 processingTime: moment().diff(startTime) + ' ms',
                 retries: retries
             };
+            console.log(r.toString());
+            //FOUND the theme of the crossword now based on that find other words
+            return r;
         })
         .catch((e) => {
-            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one. (${e})\n`);
-            return generateQuestions(num, startTime, ++retries);
+            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one with num ${num} retry count ${retries}. (${e})\n`);
+            if(retries > 10){
+                num = num + 1;
+                retries = 0;
+            }
+
+            return generateQuestions(num, startTime, ++retries, trends);
+        });
+}
+
+function findOtherQuestions(num, startTime, retries, trends) {
+    /*
+    Step 1: Get random entity from DBPedia
+    Step 2: Get entity label
+    Step 3: Get relevant properties for this entity
+    Step 4: Combine relevant properties with those actually available and fetch meta data for them
+    Step 5: Fetch actual value for the specific entity and property to be the correct answer
+    Step 6: Generate or fetch 3 alternative answers. For dates, years and numbers random values within an interval are generated. For resources values the labels of three other entities within the same class are fetched. Plain string and other types are ignored for now.
+    */
+
+    let promises = [];
+    let propertyInfos = {};
+    let entity = null;
+    let entityLabel = '';
+    let trend = null;
+
+    if (!startTime) startTime = moment();
+    if (!retries) retries = 0;
+
+    if(trends.length > num - 1){
+        trend = trends[num-1];
+    } else{
+        console.log("dbpedia query returned empty result");
+        return;
+    }
+
+    //crossword = 5x5
+
+    return fetchRandomEntityWithRegex()
+        .then(e => { entity = e; })
+        .then(() => fetchLabel(entity))
+        .then(label => { entityLabel = label; })
+        .then(() => {
+            let promises = [];
+            promises.push(fetchEntityProperties(entity));
+            promises.push(getTopEntityProperties(entity, entityLabel));
+            return Promise.all(promises);
+        })
+        .then(values => _.intersection(values[0], values[1]))
+        .then(values => [values[_.random(0, values.length - 1, false)]]) // only select one property at a time
+        .then(values => multiFetchPropertyInfo(values.slice(0, num)))
+        .then(values => { propertyInfos = values; })
+        .then(() => multiFetchCorrectAnswerValue(entity, _.sortBy(_.keys(propertyInfos))))
+        .then(values => {
+            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
+            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].correctAnswer = v);
+            return propertyInfos;
+        })
+        .then(values => multiFetchAlternativeAnswers(propertyInfos))
+        .then(values => {
+            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
+            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
+        })
+        .then(() => {
+            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
+            let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
+            let r = {
+                q: `What is the ${prop.label} of ${entityLabel}?`,
+                correctAnswer: prop.correctAnswer,
+                alternativeAnswers: prop.alternativeAnswers,
+                processingTime: moment().diff(startTime) + ' ms',
+                retries: retries
+            };
+            console.log(r.toString());
+            //FOUND the theme of the crossword now based on that find other words
+            return r;
+        })
+        .catch((e) => {
+            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one with num ${num} retry count ${retries}. (${e})\n`);
+            if(retries > 10){
+                num = num + 1;
+                retries = 0;
+            }
+
+            return generateQuestions(num, startTime, ++retries, trends);
         });
 }
 
 function multiFetchAlternativeAnswers(propertyInfos) {
     console.time('multiFetchAlternativeAnswers');
     let promises = [];
-    _.sortBy(_.keys(propertyInfos)).forEach(key => promises.push(fetchAlternativeAnswers(propertyInfos[key])));
+    // _.sortBy(_.keys(propertyInfos)).forEach(key => promises.push(fetchAlternativeAnswers(propertyInfos[key])));
     return Promise.all(promises)
         .then(values => {
             console.timeEnd('multiFetchAlternativeAnswers');
@@ -133,6 +230,7 @@ function fetchCorrectAnswerValue(entityUri, propertyUri) {
         client.query(prefixString + `SELECT ?answer WHERE {
                 ?resource ?property ?answerRes .
                 ?answerRes rdfs:label ?answer .
+                FILTER(strlen(?answer) < 10) .
                 FILTER(lang(?answer) = "en")
             }`)
             .bind('resource', entityUri)
@@ -223,6 +321,29 @@ function fetchLabel(entityUri) {
     });
 }
 
+function getTrends(inputKeyword){
+    if(inputKeyword)
+        return [inputKeyword];
+
+    return new Promise(function (resolve, reject) {
+        if(inputKeyword){
+            return [inputKeyword];
+        }else{
+            trends.load(['us'], function (err, result) {
+                if (err) {
+                    reject(err);
+                } else {
+                    let r = [];
+                    _.each(result.us, function (p) {
+                        r.push(p.title);
+                    });
+                    resolve(r);
+                }
+            })
+        }
+    });
+}
+
 
 function generatePrefixString(prefixes) {
     return _.keys(prefixes).map(k => `prefix ${k}: <${prefixes[k]}>\n`).toString().replace(/,/g, '');
@@ -244,6 +365,66 @@ function fetchRandomEntity() {
             });
     });
 }
+
+function fetchRandomEntityWithRegex(matrix, row, col, axis) {
+    console.time('fetchRandomEntity');
+    return new Promise((resolve, reject) => {
+        client.query(prefixString + `SELECT ?e WHERE { 
+                ?e rdfs:label ?label
+                FILTER regex(?label, "${generateRegex(matrix, row, col, axis)}")
+                FILTER not exists { ?e rdf:type skos:Concept } 
+            } 
+            OFFSET 0 
+            LIMIT 1`)
+            .execute((err, results) => {
+                console.timeEnd('fetchRandomEntity');
+                if (err || !results || !results.results.bindings.length) return reject(6);
+                resolve(toPrefixedUri(results.results.bindings[0].e.value));
+            });
+    });
+}
+
+function generateRegex(matrix, row, col, axis){
+    let rg = '';
+
+    if(axis){
+        for(let i= col; i < col.length; i++){
+            if(matrix[row][i])
+                rg = rg + matrix[row][i];
+            else
+                rg = rg + '.';
+        }
+    }else{
+        for(let i= row; i < row.length; i++){
+            if(matrix[i][col])
+                rg = rg + matrix[i][col];
+            else
+                rg = rg + '.';
+        }
+    }
+
+    return rg;
+}
+
+function fetchEntityByKeyword(keyword) {
+    console.time('fetchEntityByKeyword');
+    return new Promise((resolve, reject) => {
+        client.query(prefixString + `SELECT ?e WHERE { 
+                ?e dbo:wikiPageID _:bn3 .
+                ?e rdfs:label "${keyword}"@en
+                filter not exists { ?e rdf:type skos:Concept } 
+            } 
+            OFFSET 0
+            LIMIT 1`)
+            .execute((err, results) => {
+                console.timeEnd('fetchEntityByKeyword');
+                if (err || !results || !results.results.bindings.length) return reject(6);
+                resolve(toPrefixedUri(results.results.bindings[0].e.value));
+            });
+    });
+}
+
+
 
 function getTopEntityProperties(entityUri, entityLabel) {
     console.time('getTopEntityProperties');
@@ -367,8 +548,33 @@ function toPrefixedUri(uri) {
     return shortUri;
 }
 
+function insertWordToMatrix(word, matrix, row, col, axis){
+        for(let i=0; i<word.length; i++){
+            matrix[index]
+        }
+}
+
 module.exports = {
     generateRandom: () => {
-        return generateQuestions(1);
+        return getTrends(null)
+            .then(result =>{
+
+
+                //matrix 10x10
+                let matrix = [];
+                let arr = [];
+                for(let j=0; j<10; j++){
+                    arr.push(null);
+                }
+
+                for(let i=0; i<10; i++){
+                    matrix.push(arr);
+                }
+
+                let theme = generateQuestions(1, null, null, result);
+                theme = theme.correctAnswer.split('');
+                console.log(JSON.stringify(matrix));
+                return matrix;
+            });
     }
 }
