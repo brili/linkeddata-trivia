@@ -19,6 +19,7 @@ const blacklist = JSON.parse(fs.readFileSync(path.normalize('./resources/blackli
     prefixString = generatePrefixString(prefixMap);
 
 let numTotalEntities = _.keys(sortedClasses).reduce((acc, val) => acc + sortedClasses[val], 0);
+let matrix = [];
 
 /* Currently only supports to generate 1 question at a time. */
 function generateQuestions(num, startTime, retries, trends) {
@@ -548,33 +549,45 @@ function toPrefixedUri(uri) {
     return shortUri;
 }
 
-function insertWordToMatrix(word, matrix, row, col, axis){
+//@param axis true for horizontal
+function insertWordToMatrix(word, row, col, axis){
+    if(axis){
         for(let i=0; i<word.length; i++){
-            matrix[index]
+            matrix[row][i] = word[i];
         }
+    }else{
+        for(let i=0; i<word.length; i++){
+            matrix[i][col] = word[i];
+        }
+    }
+
 }
 
 module.exports = {
     generateRandom: () => {
         return getTrends(null)
             .then(result =>{
-
-
-                //matrix 10x10
-                let matrix = [];
+                //sample matrix 10x10
                 let arr = [];
+
+                //initialize matrix for easier regex generation on null chars
                 for(let j=0; j<10; j++){
                     arr.push(null);
                 }
-
                 for(let i=0; i<10; i++){
                     matrix.push(arr);
                 }
 
-                let theme = generateQuestions(1, null, null, result);
-                theme = theme.correctAnswer.split('');
-                console.log(JSON.stringify(matrix));
-                return matrix;
+
+                generateQuestions(1, null, null, result)
+                    .then(theme =>{
+                        theme = theme.correctAnswer.split('');
+                        insertWordToMatrix(theme, 0, 0 , true);
+                        console.log(JSON.stringify(matrix));
+                        return matrix;
+                    });
+
+
             });
     }
 }
