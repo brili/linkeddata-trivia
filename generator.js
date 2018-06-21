@@ -19,6 +19,8 @@ const blacklist = JSON.parse(fs.readFileSync(path.normalize('./resources/blackli
     prefixString = generatePrefixString(prefixMap);
 
 let numTotalEntities = _.keys(sortedClasses).reduce((acc, val) => acc + sortedClasses[val], 0);
+let crossword_row = 10,
+    crossword_col = 10;
 let matrix = [];
 
 /* Currently only supports to generate 1 question at a time. */
@@ -50,10 +52,11 @@ function generateQuestions(num, startTime, retries, trends) {
 
     //crossword = 5x5
 
-    return fetchEntityByKeyword(trend)
-        .then(e => { entity = e; })
-        .then(() => fetchLabel(entity))
-        .then(label => { entityLabel = label; })
+    return fetchEntityByKeyword(trend, retries)
+        .then(ent => {
+            entity = ent.e;
+            entityLabel = ent.label;
+        })
         .then(() => {
             let promises = [];
             promises.push(fetchEntityProperties(entity));
@@ -91,7 +94,7 @@ function generateQuestions(num, startTime, retries, trends) {
         })
         .catch((e) => {
             console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one with num ${num} retry count ${retries}. (${e})\n`);
-            if(retries > 10){
+            if(retries > 10 || e == 61){
                 num = num + 1;
                 retries = 0;
             }
@@ -407,20 +410,29 @@ function generateRegex(matrix, row, col, axis){
     return rg;
 }
 
-function fetchEntityByKeyword(keyword) {
+function fetchEntityByKeyword(keyword, offset) {
     console.time('fetchEntityByKeyword');
     return new Promise((resolve, reject) => {
-        client.query(prefixString + `SELECT ?e WHERE { 
-                ?e dbo:wikiPageID _:bn3 .
-                ?e rdfs:label "${keyword}"@en
-                filter not exists { ?e rdf:type skos:Concept } 
+        if(!keyword)
+            return reject(6);
+        client.query(prefixString + `SELECT ?e ?label WHERE { 
+                ?e rdfs:label ?label
+                FILTER regex(?label, "${keyword}", "i") .
+                FILTER(lang(?label) = "en")
+                FILTER not exists { ?e rdf:type skos:Concept } 
             } 
-            OFFSET 0
+            OFFSET ${offset}
             LIMIT 1`)
             .execute((err, results) => {
                 console.timeEnd('fetchEntityByKeyword');
                 if (err || !results || !results.results.bindings.length) return reject(6);
-                resolve(toPrefixedUri(results.results.bindings[0].e.value));
+                let rs = {
+                    e: toPrefixedUri(results.results.bindings[0].e.value),
+                    label: results.results.bindings[0].label.value
+                };
+                if(rs.e.includes("wd"))
+                    return reject(61);
+                resolve(rs);
             });
     });
 }
