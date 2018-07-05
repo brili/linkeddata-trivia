@@ -1,9 +1,46 @@
 let btn = $('#mainButton');
+let clueButton = $('#clueButton');
 let btnTextOriginal = btn.text();
+let clueButtonTextOriginal = clueButton.text();
 let answerButtonsElem = $('#answerButtons');
 let questionHeadingElem = $('#questionHeading');
 let questionContainerElem = $('.questionContainer');
-let alertElem = $('.alert');
+let alertElem = $('.patient');
+let crosswordThemeDiv = $('.crosswordTheme');
+let crosswordTheme = $('#crosswordTheme');
+
+/* set language and paint canvas in browser */
+var game;
+
+$(function() {
+    var width = 20;
+    var height = 15;
+    $("canvas").attr("width", 40 * width).attr("height", 40 * height);
+
+    var canvas = $("canvas")[0];
+    game = new Crossword(canvas, width, height);
+    game.clearCanvas(true);
+
+
+
+    $("#add-clue button").click(function() {
+        var clue = $("#question").val();
+        var word = $("#word").val().split(/\s/)[0];
+
+        game.addWord(word, function(error, clueAnchor, direction) {
+            if (error) {
+                throw error;
+            }
+            var clueRef = $("<li>");
+            clueRef.append($("<strong>").text(clueAnchor));
+            clueRef.append(clue || word);
+            clueRef.append($("<small>").text(word));
+            $("#" + direction + " .list").append(clueRef);
+        });
+
+        $("#add-clue input").val("");
+    });
+});
 
 btn.click(() => {
     btn.attr("disabled", true);
@@ -13,21 +50,41 @@ btn.click(() => {
     questionHeadingElem.empty();
 
     let answerButtons = [];
-    $.getJSON('/api/random', data => {
-        questionHeadingElem.html(data.q);
-        $.each(data.alternativeAnswers, (index, a) => answerButtons.push($('<button type="button" class="btn btn-secondary answerButton wrongAnswer">' + a + '</button>')));
-        answerButtons.push($('<button type="button" class="btn btn-secondary answerButton correctAnswer">' + data.correctAnswer + '</button>'));
-        answerButtons = shuffle(answerButtons);
-        $.each(answerButtons, (index, b) => answerButtonsElem.append(b));
+    let inputTheme = $('#inputTheme').val();
+    $.getJSON('/api/theme', {"theme": inputTheme}, data => {
+        if(!data){
+            alert("No theme found. Try manual theme");
+        }
+        else{
 
-        $('.wrongAnswer').click(() => alert('Sorry, that was wrong...'));
-        $('.correctAnswer').click(() => alert('Yes, right!'));
+            var clue = data.q;
+            var word = data.correctAnswer.toLowerCase().replace(/[^a-zA-Z0-9]+/g, "");
+            crosswordThemeDiv.show();
+            crosswordTheme.show();
+            crosswordTheme.text(data.theme);
+            game.addWord(word, function(error, clueAnchor, direction) {
+                if (error) {
+                    return;
+                }
+                var clueRef = $("<li>");
+                clueRef.append($("<strong>").text(clueAnchor));
+                clueRef.append(clue || word);
+                clueRef.append($("<small>").text(word));
+                $("#" + direction + " .list").append(clueRef);
+            });
+
+            $("#add-clue input").val("");
+        }
+
+
+
+        alertElem.hide();
 
         btn.attr("disabled", false);
         btn.text(btnTextOriginal);
 
-        alertElem.hide();
-        questionContainerElem.show();
+
+
     });
 });
 

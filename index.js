@@ -13,6 +13,15 @@ app.get('/api/random', (req, res) => {
     });
 });
 
+app.get('/api/theme', (req, res) => {
+    var inputTheme = req.query.theme;
+    generator.generateTheme(inputTheme).then((data) => {
+        res.json(data);
+    });
+});
+
+
+
 app.listen(PORT, function() {
     console.log(`Example app listening on port ${PORT}!`);
 });

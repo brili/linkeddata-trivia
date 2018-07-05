@@ -19,20 +19,74 @@ const blacklist = JSON.parse(fs.readFileSync(path.normalize('./resources/blackli
     prefixString = generatePrefixString(prefixMap);
 
 let numTotalEntities = _.keys(sortedClasses).reduce((acc, val) => acc + sortedClasses[val], 0);
-let crossword_row = 10,
-    crossword_col = 10;
-let matrix = [];
-let matrix_rows = [];
+let chosenTheme = null;
 
 /* Currently only supports to generate 1 question at a time. */
-function generateTheme(num, startTime, retries, trends) {
-    /* 
+function generateQuestions(num, startTime, retries) {
+    /*
     Step 1: Get random entity from DBPedia
-    Step 2: Get entity label    
+    Step 2: Get entity label
     Step 3: Get relevant properties for this entity
-    Step 4: Combine relevant properties with those actually available and fetch meta data for them 
+    Step 4: Combine relevant properties with those actually available and fetch meta data for them
     Step 5: Fetch actual value for the specific entity and property to be the correct answer
-    Step 6: Generate or fetch 3 alternative answers. For dates, years and numbers random values within an interval are generated. For resources values the labels of three other entities within the same class are fetched. Plain string and other types are ignored for now.
+    */
+
+    let promises = [];
+    let propertyInfos = {};
+    let entity = null;
+    let entityLabel = '';
+
+    if (!startTime) startTime = moment();
+    if (!retries) retries = 0;
+
+    return fetchRandomEntity()
+        .then(e => { entity = e; })
+        .then(() => fetchLabel(entity))
+        .then(label => { entityLabel = label; })
+        .then(() => {
+            let promises = [];
+            promises.push(fetchEntityProperties(entity));
+            promises.push(getTopEntityProperties(entity, entityLabel));
+            return Promise.all(promises);
+        })
+        .then(values => _.intersection(values[0], values[1]))
+        .then(values => [values[_.random(0, values.length - 1, false)]]) // only select one property at a time
+        .then(values => multiFetchPropertyInfo(values.slice(0, num)))
+        .then(values => { propertyInfos = values; })
+        .then(() => multiFetchCorrectAnswerValue(entity, _.sortBy(_.keys(propertyInfos))))
+        .then(values => {
+            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
+            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].correctAnswer = v);
+            return propertyInfos;
+        })
+        .then(values => [])
+        .then(values => {
+            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
+            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
+        })
+        .then(() => {
+            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
+            let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
+            return {
+                q: `What is the ${prop.label} of ${entityLabel}?`,
+                correctAnswer: prop.correctAnswer,
+                processingTime: moment().diff(startTime) + ' ms',
+                retries: retries
+            };
+        })
+        .catch((e) => {
+            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one. (${e})\n`);
+            return generateQuestions(num, startTime, ++retries);
+        });
+}
+
+function generateTheme(num, startTime, retries, trends) {
+    /*
+    Step 1: Get random entity from DBPedia
+    Step 2: Get entity label
+    Step 3: Get relevant properties for this entity
+    Step 4: Combine relevant properties with those actually available and fetch meta data for them
+    Step 5: Fetch actual value for the specific entity and property to be the correct answer
     */
 
     let promises = [];
@@ -46,18 +100,17 @@ function generateTheme(num, startTime, retries, trends) {
 
     if(trends.length > num - 1){
         trend = trends[num-1];
+        chosenTheme = trend;
     } else{
         console.log("dbpedia query returned empty result");
+        chosenTheme = null;
         return null;
     }
 
-    //crossword = 5x5
-
-    return fetchEntityByKeyword(trend, retries)
-        .then(ent => {
-            entity = ent.e;
-            entityLabel = ent.label;
-        })
+    return fetchEntityByName(trend)
+        .then(e => { entity = e; })
+        .then(() => fetchLabel(entity))
+        .then(label => { entityLabel = label; })
         .then(() => {
             let promises = [];
             promises.push(fetchEntityProperties(entity));
@@ -74,7 +127,7 @@ function generateTheme(num, startTime, retries, trends) {
             values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].correctAnswer = v);
             return propertyInfos;
         })
-        .then(values => multiFetchAlternativeAnswers(propertyInfos))
+        .then(values => [])
         .then(values => {
             let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
             values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
@@ -82,179 +135,21 @@ function generateTheme(num, startTime, retries, trends) {
         .then(() => {
             console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
             let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
-            let r = {
+            return {
                 q: `What is the ${prop.label} of ${entityLabel}?`,
                 correctAnswer: prop.correctAnswer,
-                alternativeAnswers: prop.alternativeAnswers,
                 processingTime: moment().diff(startTime) + ' ms',
-                retries: retries
+                retries: retries,
+                theme: chosenTheme
             };
-            console.log(r.toString());
-            //FOUND the theme of the crossword now based on that find other words
-            return r;
         })
         .catch((e) => {
-            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one with num ${num} retry count ${retries}. (${e})\n`);
+            console.log(`\n[INFO] Failed to generateTheme for entity ${entity}. Retrying another one. (${e})\n`);
             if(retries > 10){
                 num = num + 1;
                 retries = 0;
             }
-
             return generateTheme(num, startTime, ++retries, trends);
-        });
-}
-
-function generateRandomTheme(num, startTime, retries, previousTheme) {
-
-    if(previousTheme)
-        return previousTheme;
-    /*
-    Step 1: Get random entity from DBPedia
-    Step 2: Get entity label
-    Step 3: Get relevant properties for this entity
-    Step 4: Combine relevant properties with those actually available and fetch meta data for them
-    Step 5: Fetch actual value for the specific entity and property to be the correct answer
-    Step 6: Generate or fetch 3 alternative answers. For dates, years and numbers random values within an interval are generated. For resources values the labels of three other entities within the same class are fetched. Plain string and other types are ignored for now.
-    */
-
-    let promises = [];
-    let propertyInfos = {};
-    let entity = null;
-    let entityLabel = '';
-
-    if (!startTime) startTime = moment();
-    if (!retries) retries = 0;
-
-    //crossword = 5x5
-
-    return fetchRandomEntity()
-        .then(ent => {
-            entity = ent.e;
-            entityLabel = ent.label;
-        })
-        .then(() => {
-            let promises = [];
-            promises.push(fetchEntityProperties(entity));
-            promises.push(getTopEntityProperties(entity, entityLabel));
-            return Promise.all(promises);
-        })
-        .then(values => _.intersection(values[0], values[1]))
-        .then(values => [values[_.random(0, values.length - 1, false)]]) // only select one property at a time
-        .then(values => multiFetchPropertyInfo(values.slice(0, num)))
-        .then(values => { propertyInfos = values; })
-        .then(() => multiFetchCorrectAnswerValue(entity, _.sortBy(_.keys(propertyInfos))))
-        .then(values => {
-            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
-            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].correctAnswer = v);
-            return propertyInfos;
-        })
-        .then(values => multiFetchAlternativeAnswers(propertyInfos))
-        .then(values => {
-            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
-            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
-        })
-        .then(() => {
-            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
-            let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
-            let r = {
-                q: `What is the ${prop.label} of ${entityLabel}?`,
-                correctAnswer: prop.correctAnswer,
-                alternativeAnswers: prop.alternativeAnswers,
-                processingTime: moment().diff(startTime) + ' ms',
-                retries: retries
-            };
-            console.log(r.toString());
-            return r;
-        })
-        .catch((e) => {
-            console.log(`\n[INFO] Failed to fetch random theme entity ${entity}. Retrying another one retry count ${retries}. (${e})\n`);
-            if(retries > 100 || e == 61){
-                return false;
-            }
-
-            return generateRandomTheme(num, startTime, ++retries, null);
-        });
-}
-
-function generateOtherWords(num, startTime, retries) {
-
-    /*
-    Step 1: Get random entity from DBPedia
-    Step 2: Get entity label
-    Step 3: Get relevant properties for this entity
-    Step 4: Combine relevant properties with those actually available and fetch meta data for them
-    Step 5: Fetch actual value for the specific entity and property to be the correct answer
-    Step 6: Generate or fetch 3 alternative answers. For dates, years and numbers random values within an interval are generated. For resources values the labels of three other entities within the same class are fetched. Plain string and other types are ignored for now.
-    */
-
-    if(matrix_rows.length >= matrix[0].length || num > matrix[0].length){
-        return true;
-    }
-
-
-    let promises = [];
-    let propertyInfos = {};
-    let entity = null;
-    let entityLabel = '';
-    let werd = null;
-
-    if (!startTime) startTime = moment();
-    if (!retries) retries = 0;
-
-    if(matrix[0].length > num){
-        werd = matrix[num];
-    } else{
-        console.log("dbpedia query returned empty result for generateOtherWords");
-        return null;
-    }
-
-    return fetchRandomEntityWithRegex(matrix, num)
-        .then(ent => {
-            entity = ent.e;
-            entityLabel = ent.label;
-        })
-        .then(() => {
-            let promises = [];
-            promises.push(fetchEntityProperties(entity));
-            promises.push(getTopEntityProperties(entity, entityLabel));
-            return Promise.all(promises);
-        })
-        .then(values => _.intersection(values[0], values[1]))
-        .then(values => [values[_.random(0, values.length - 1, false)]]) // only select one property at a time
-        .then(values => multiFetchPropertyInfo(values.slice(0, num + 1)))
-        .then(values => { propertyInfos = values; })
-        .then(() => multiFetchCorrectAnswerValue(entity, _.sortBy(_.keys(propertyInfos))))
-        .then(values => {
-            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
-            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].correctAnswer = v);
-            return propertyInfos;
-        })
-        .then(values => multiFetchAlternativeAnswers(propertyInfos))
-        .then(values => {
-            let sortedPropertyKeys = _.sortBy(_.keys(propertyInfos));
-            values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
-        })
-        .then(() => {
-            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
-            let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
-            let r = {
-                q: `What is the ${prop.label} of ${entityLabel}?`,
-                correctAnswer: prop.correctAnswer,
-                alternativeAnswers: prop.alternativeAnswers,
-                processingTime: moment().diff(startTime) + ' ms',
-                retries: retries
-            };
-            console.log(r.toString());
-            return r;
-        })
-        .catch((e) => {
-            console.log(`\n[INFO] Failed to fetch other keywordtheme entity ${entity} for num: ${num}. Retrying another one retry count ${retries}. (${e})\n`);
-            if(retries > 10){
-                retries = 0;
-                num = num + 1;
-            }
-
-            return generateOtherWords(num, startTime, ++retries);
         });
 }
 
@@ -311,7 +206,6 @@ function fetchCorrectAnswerValue(entityUri, propertyUri) {
         client.query(prefixString + `SELECT ?answer WHERE {
                 ?resource ?property ?answerRes .
                 ?answerRes rdfs:label ?answer .
-                FILTER(strlen(?answer) < 10) .
                 FILTER(lang(?answer) = "en")
             }`)
             .bind('resource', entityUri)
@@ -395,34 +289,10 @@ function fetchLabel(entityUri) {
             }`)
             .bind('entity', entityUri)
             .execute((err, results) => {
-                console.timeEnd('fetchLabel');
+                console.timeEnd('fetchLabel')
                 if (err || !results || !results.results.bindings.length) return reject(3);
                 resolve(results.results.bindings[0].label.value);
             });
-    });
-}
-
-function getTrends(inputKeyword){
-    if(inputKeyword)
-        return [inputKeyword];
-
-    return new Promise(function (resolve, reject) {
-        if(inputKeyword){
-            return [inputKeyword];
-        }else{
-            trends.load(['us'], function (err, result) {
-                if (err) {
-                    reject(err);
-                } else {
-                    let r = [];
-                    _.each(result.us, function (p) {
-                        if(p.title.length <= crossword_row) // TODO split the string if needed
-                            r.push(p.title);
-                    });
-                    resolve(r);
-                }
-            })
-        }
     });
 }
 
@@ -432,112 +302,38 @@ function generatePrefixString(prefixes) {
 }
 
 function fetchRandomEntity() {
-    //OFFSET ${_.random(0, numTotalEntities)}
     console.time('fetchRandomEntity');
     return new Promise((resolve, reject) => {
-        client.query(prefixString + `SELECT ?e ?label WHERE { 
+        client.query(prefixString + `SELECT ?e WHERE { 
                 ?e dbo:wikiPageID _:bn3 .
-                ?e rdfs:label ?label
-                FILTER(lang(?label) = "en")
-                FILTER(strlen(?label) = 10) 
-                FILTER(lang(?label) = "en")
+                ?e rdfs:label _:bn4 
             } 
-            OFFSET ${_.random(0, 20)} 
+            OFFSET ${_.random(0, numTotalEntities)} 
             LIMIT 1`)
             .execute((err, results) => {
                 console.timeEnd('fetchRandomEntity');
                 if (err || !results || !results.results.bindings.length) return reject(6);
-                let r = {
-                    e: toPrefixedUri(results.results.bindings[0].e.value),
-                    label: toPrefixedUri(results.results.bindings[0].label.value)
-                };
-                resolve(r);
+                resolve(toPrefixedUri(results.results.bindings[0].e.value));
             });
     });
 }
 
-function fetchRandomEntityWithRegex(matrix, num) {
-    console.time('fetchRandomEntity');
+function fetchEntityByName(keyword) {
+    console.time('fetchEntityByName');
     return new Promise((resolve, reject) => {
-        client.query(prefixString + `SELECT ?e ?label WHERE { 
+        client.query(prefixString + `SELECT ?e WHERE { 
                 ?e dbo:wikiPageID _:bn3 .
                 ?e rdfs:label ?label
-                FILTER regex(?label, "${generateRegex(matrix, num, 0)}")
-                FILTER not exists { ?e rdf:type skos:Concept } 
-                FILTER(lang(?label) = "en")
-            } 
-            OFFSET ${_.random(0, 500)}
-            LIMIT 1`)
+FILTER(?label="${keyword}"@en)
+FILTER not exists { ?e rdf:type skos:Concept }
+            } `)
             .execute((err, results) => {
                 console.timeEnd('fetchRandomEntity');
                 if (err || !results || !results.results.bindings.length) return reject(6);
-                let r = {
-                    e: toPrefixedUri(results.results.bindings[0].e.value),
-                    label: toPrefixedUri(results.results.bindings[0].label.value)
-                };
-                resolve(r);
+                resolve(toPrefixedUri(results.results.bindings[0].e.value));
             });
     });
 }
-
-function generateRegex(matrix, num, index){
-    let rg = '';
-
-    rg = rg+matrix[index][num];
-
-    for(let i=1; i< crossword_col; i++){
-            rg = rg + '.';
-    }
-    return rg;
-    // let rg = '';
-    //
-    // if(axis){
-    //     for(let i= col; i < col.length; i++){
-    //         if(matrix[row][i])
-    //             rg = rg + matrix[row][i];
-    //         else
-    //             rg = rg + '.';
-    //     }
-    // }else{
-    //     for(let i= row; i < row.length; i++){
-    //         if(matrix[i][col])
-    //             rg = rg + matrix[i][col];
-    //         else
-    //             rg = rg + '.';
-    //     }
-    // }
-    //
-    // return rg;
-}
-
-function fetchEntityByKeyword(keyword, offset) {
-    console.time('fetchEntityByKeyword');
-    return new Promise((resolve, reject) => {
-        if(!keyword)
-            return reject(6);
-        client.query(prefixString + `SELECT ?e ?label WHERE { 
-                ?e rdfs:label "${keyword}"@en .
-                ?e rdfs:label ?label
-                FILTER(lang(?label) = "en")
-                FILTER not exists { ?e rdf:type skos:Concept }
-            } 
-            OFFSET ${offset}
-            LIMIT 1`)
-            .execute((err, results) => {
-                console.timeEnd('fetchEntityByKeyword');
-                if (err || !results || !results.results.bindings.length) return reject(6);
-                let rs = {
-                    e: toPrefixedUri(results.results.bindings[0].e.value),
-                    label: results.results.bindings[0].label.value
-                };
-                if(rs.e.includes("wd"))
-                    return reject(61);
-                resolve(rs);
-            });
-    });
-}
-
-
 
 function getTopEntityProperties(entityUri, entityLabel) {
     console.time('getTopEntityProperties');
@@ -661,39 +457,49 @@ function toPrefixedUri(uri) {
     return shortUri;
 }
 
-//@param axis true for horizontal
-function insertWordToMatrix(word, row, col, axis){
-    word = word.replace(/\s/g,''); //trim all whitespace
-    matrix[matrix.length]=word.split('');
+function getTrends(inputKeyword){
+    return new Promise(function (resolve, reject) {
+        if(inputKeyword !== ""){
+            resolve([inputKeyword]);
+        }else{
+            trends.load(['us'], function (err, result) {
+                if (err) {
+                    reject(err);
+                } else {
+                    let r = [];
+                    _.each(result.us, function (p) {
+                            r.push(p.title);
+                    });
+                    resolve(r);
+                }
+            })
+        }
+    });
 }
 
 module.exports = {
     generateRandom: () => {
-        return getTrends(null)
+        return generateQuestions(1)
+    },
+    generateTheme: (inputTheme) => {
+        return getTrends(inputTheme)
             .then(result =>{
-                result = ['Google'];
-                matrix = [
-                    ["b", "r", "a", "d", "p","i","t","t"]
-                ];
 
-                return generateOtherWords(0, null, null);
+                // return generateOtherWords(0, null, null);
 
                 // return fetchRandomEntity(result);
                 //sample matrix 10x10
-                // return result;
+                return result;
 
             })
             .then(result => generateTheme(1, null, null, result))
-            .then(theme => generateRandomTheme(1, null, null, theme))
             .then(theme => {
-                if(!theme)
-                    return [];
-                insertWordToMatrix(theme.correctAnswer, 0, 0 , true);
-                return generateOtherWords(0, null, null);
                 console.log(theme);
+                return theme;
             })
-            .then(() => {
-               return matrix;
+            .catch((e) => {
+                console.log(e);
+                return false;
             });
     }
 }
