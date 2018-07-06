@@ -69,15 +69,15 @@ input {
   margin-right: 10px;
 }
 
-small {
-  background: #000;
-  color: #000;
-  margin-left: 10px;
-}
+/*small {*/
+  /*background: #000;*/
+  /*color: #000;*/
+  /*margin-left: 10px;*/
+/*}*/
 
-small:hover, small:active {
-  color: #fff;
-}
+/*small:hover, small:active {*/
+  /*color: #fff;*/
+/*}*/
 
 @media print {
   small, #add-clue, .no-print {
