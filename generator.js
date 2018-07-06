@@ -65,7 +65,7 @@ function generateQuestions(num, startTime, retries) {
             values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
         })
         .then(() => {
-            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
+            // console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
             let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
             return {
                 q: `What is the ${prop.label} of ${entityLabel}?`,
@@ -75,7 +75,7 @@ function generateQuestions(num, startTime, retries) {
             };
         })
         .catch((e) => {
-            console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one. (${e})\n`);
+            // console.log(`\n[INFO] Failed to fetch complete data for entity ${entity}. Retrying another one. (${e})\n`);
             return generateQuestions(num, startTime, ++retries);
         });
 }
@@ -102,7 +102,7 @@ function generateTheme(num, startTime, retries, trends) {
         trend = trends[num-1];
         chosenTheme = trend;
     } else{
-        console.log("dbpedia query returned empty result");
+        // console.log("dbpedia query returned empty result");
         chosenTheme = null;
         return null;
     }
@@ -133,7 +133,7 @@ function generateTheme(num, startTime, retries, trends) {
             values.forEach((v, i) => propertyInfos[sortedPropertyKeys[i]].alternativeAnswers = v);
         })
         .then(() => {
-            console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
+            // console.log(`\n[INFO] Fetched data for entity ${entity}.\n`);
             let prop = propertyInfos[_.keys(propertyInfos)[0]]; // Only support one at a time for now
             return {
                 q: `What is the ${prop.label} of ${entityLabel}?`,
@@ -144,7 +144,7 @@ function generateTheme(num, startTime, retries, trends) {
             };
         })
         .catch((e) => {
-            console.log(`\n[INFO] Failed to generateTheme for entity ${entity}. Retrying another one. (${e})\n`);
+            // console.log(`\n[INFO] Failed to generateTheme for entity ${entity}. Retrying another one. (${e})\n`);
             if(retries > 10){
                 num = num + 1;
                 retries = 0;
@@ -154,12 +154,12 @@ function generateTheme(num, startTime, retries, trends) {
 }
 
 function multiFetchAlternativeAnswers(propertyInfos) {
-    console.time('multiFetchAlternativeAnswers');
+    // console.time('multiFetchAlternativeAnswers');
     let promises = [];
     _.sortBy(_.keys(propertyInfos)).forEach(key => promises.push(fetchAlternativeAnswers(propertyInfos[key])));
     return Promise.all(promises)
         .then(values => {
-            console.timeEnd('multiFetchAlternativeAnswers');
+            // console.timeEnd('multiFetchAlternativeAnswers');
             return values;
         });
 }
@@ -189,12 +189,12 @@ function fetchAlternativeAnswers(propertyInfo) {
 
 // TODO: Use construct query instead of multiple sequential select queries.
 function multiFetchCorrectAnswerValue(entityUri, propertyUris) {
-    console.time('multiFetchAlternativeAnswers');
+    // console.time('multiFetchAlternativeAnswers');
     let promises = [];
     propertyUris.forEach(uri => promises.push(fetchCorrectAnswerValue(entityUri, uri)));
     return Promise.all(promises)
         .then(values => {
-            console.timeEnd('multiFetchAlternativeAnswers');
+            // console.timeEnd('multiFetchAlternativeAnswers');
             return values;
         });
 }
@@ -219,7 +219,7 @@ function fetchCorrectAnswerValue(entityUri, propertyUri) {
 
 // TODO: Use construct query instead of multiple sequential select queries.
 function multiFetchPropertyInfo(propertyUris) {
-    console.time('multiFetchPropertyInfo');
+    // console.time('multiFetchPropertyInfo');
     return new Promise((resolve, reject) => {
         let promises = [];
         propertyUris.forEach(uri => promises.push(fetchPropertyInfo(uri)));
@@ -231,7 +231,7 @@ function multiFetchPropertyInfo(propertyUris) {
                 }, {});
             })
             .then(values => {
-                console.timeEnd('multiFetchPropertyInfo');
+                // console.timeEnd('multiFetchPropertyInfo');
                 return values;
             })
             .then(resolve)
@@ -261,7 +261,7 @@ function fetchPropertyInfo(propertyUri) {
 }
 
 function fetchEntityProperties(entityUri) {
-    console.time('fetchEntityProperties');
+    // console.time('fetchEntityProperties');
     return new Promise((resolve, reject) => {
         client.query(prefixString + `SELECT DISTINCT(?p) WHERE {
                 ?resource ?p _:bn1 .
@@ -270,7 +270,7 @@ function fetchEntityProperties(entityUri) {
             }`)
             .bind('resource', entityUri)
             .execute((err, results) => {
-                console.timeEnd('fetchEntityProperties');
+                // console.timeEnd('fetchEntityProperties');
                 if (err) return reject(5);
                 let properties = results.results.bindings.map(b => b.p.value);
                 resolve(properties);
@@ -279,7 +279,7 @@ function fetchEntityProperties(entityUri) {
 }
 
 function fetchLabel(entityUri) {
-    console.time('fetchLabel');
+    // console.time('fetchLabel');
     return new Promise((resolve, reject) => {
         entityUri = entityUri.indexOf('http://') == 0 ? '<' + entityUri + '>' : entityUri;
         client.query(prefixString + `
@@ -289,7 +289,7 @@ function fetchLabel(entityUri) {
             }`)
             .bind('entity', entityUri)
             .execute((err, results) => {
-                console.timeEnd('fetchLabel')
+                // console.timeEnd('fetchLabel')
                 if (err || !results || !results.results.bindings.length) return reject(3);
                 resolve(results.results.bindings[0].label.value);
             });
@@ -302,7 +302,7 @@ function generatePrefixString(prefixes) {
 }
 
 function fetchRandomEntity() {
-    console.time('fetchRandomEntity');
+    // console.time('fetchRandomEntity');
     return new Promise((resolve, reject) => {
         client.query(prefixString + `SELECT ?e WHERE { 
                 ?e dbo:wikiPageID _:bn3 .
@@ -311,7 +311,7 @@ function fetchRandomEntity() {
             OFFSET ${_.random(0, numTotalEntities)} 
             LIMIT 1`)
             .execute((err, results) => {
-                console.timeEnd('fetchRandomEntity');
+                // console.timeEnd('fetchRandomEntity');
                 if (err || !results || !results.results.bindings.length) return reject(6);
                 resolve(toPrefixedUri(results.results.bindings[0].e.value));
             });
@@ -319,16 +319,16 @@ function fetchRandomEntity() {
 }
 
 function fetchEntityByName(keyword) {
-    console.time('fetchEntityByName');
+    // console.time('fetchEntityByName');
     return new Promise((resolve, reject) => {
         client.query(prefixString + `SELECT ?e WHERE { 
                 ?e dbo:wikiPageID _:bn3 .
                 ?e rdfs:label ?label
-FILTER(?label="${keyword}"@en)
-FILTER not exists { ?e rdf:type skos:Concept }
+                FILTER(?label="${keyword}"@en)
+                FILTER not exists { ?e rdf:type skos:Concept }
             } `)
             .execute((err, results) => {
-                console.timeEnd('fetchRandomEntity');
+                // console.timeEnd('fetchRandomEntity');
                 if (err || !results || !results.results.bindings.length) return reject(6);
                 resolve(toPrefixedUri(results.results.bindings[0].e.value));
             });
@@ -336,7 +336,7 @@ FILTER not exists { ?e rdf:type skos:Concept }
 }
 
 function getTopEntityProperties(entityUri, entityLabel) {
-    console.time('getTopEntityProperties');
+    // console.time('getTopEntityProperties');
 
     let opts = {
         uri: RANKING_ENDPOINT,
@@ -352,7 +352,7 @@ function getTopEntityProperties(entityUri, entityLabel) {
         .then(results => results.filter(v => !blacklist.includes(v)))
         .then(results => results.filter(v => v.indexOf('/property/') === -1)) // dbp:-properties don't have ranges and labels
         .then(results => {
-            console.timeEnd('getTopEntityProperties');
+            // console.timeEnd('getTopEntityProperties');
             return results;
         });
 }
@@ -366,7 +366,7 @@ function extractAnswerClass(property) {
 }
 
 function randomDateAnswers(num, reference) {
-    console.time('randomDateAnswers');
+    // console.time('randomDateAnswers');
 
     let referenceDate = moment(reference);
 
@@ -375,12 +375,12 @@ function randomDateAnswers(num, reference) {
         if (i % 2 == 0) randoms.push(referenceDate.clone().add(_.random(0, 2920), 'days').format('YYYY-MM-DD'));
         else randoms.push(referenceDate.clone().subtract(_.random(0, 2920), 'days').format('YYYY-MM-DD'));
     }
-    console.timeEnd('randomDateAnswers');
+    // console.timeEnd('randomDateAnswers');
     return Promise.resolve(randoms);
 }
 
 function randomYearAnswers(num, reference) {
-    console.time('randomYearAnswers');
+    // console.time('randomYearAnswers');
 
     let before = Math.min(reference + 200, 2017);
     let after = reference - 200;
@@ -389,12 +389,12 @@ function randomYearAnswers(num, reference) {
     for (let i = 0; i < num; i++) {
         randoms.push(_.random(after, before, false));
     }
-    console.timeEnd('randomYearAnswers');
+    // console.timeEnd('randomYearAnswers');
     return Promise.resolve(randoms);
 }
 
 function randomNumericAnswers(num, reference, float) {
-    console.time('randomNumericAnswers');
+    // console.time('randomNumericAnswers');
 
     let oom = orderOfMagnitude(reference);
     let fixed = decimalPlaces(reference);
@@ -403,7 +403,7 @@ function randomNumericAnswers(num, reference, float) {
     for (let i = 0; i < num; i++) {
         randoms.push(_.random(reference - Math.pow(10, oom - 1) * 9, reference + Math.pow(10, oom - 1) * 9, float).toFixed(fixed));
     }
-    console.timeEnd('randomNumericAnswers');
+    // console.timeEnd('randomNumericAnswers');
     return Promise.resolve(randoms);
 }
 
@@ -411,7 +411,7 @@ function randomClassAnswers(num, classUri) {
     let promises = [];
     classUri = classUri.indexOf('http://') == 0 ? '<' + classUri + '>' : classUri;
 
-    console.time('randomClassAnswers');
+    // console.time('randomClassAnswers');
     for (let i = 0; i < num; i++) {
         promises.push(new Promise((resolve, reject) => {
             client.query(prefixString + ` 
@@ -431,7 +431,7 @@ function randomClassAnswers(num, classUri) {
     }
     return Promise.all(promises)
         .then(values => {
-            console.timeEnd('randomClassAnswers');
+            // console.timeEnd('randomClassAnswers');
             return values;
         });
 }
@@ -494,11 +494,11 @@ module.exports = {
             })
             .then(result => generateTheme(1, null, null, result))
             .then(theme => {
-                console.log(theme);
+                // console.log(theme);
                 return theme;
             })
             .catch((e) => {
-                console.log(e);
+                // console.log(e);
                 return false;
             });
     }
