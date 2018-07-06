@@ -88,6 +88,49 @@ btn.click(() => {
     });
 });
 
+clueButton.click(() => {
+    clueButton.attr("disabled", true);
+    clueButton.text('↺ Loading ...');
+    alertElem.show();
+    answerButtonsElem.empty();
+    questionHeadingElem.empty();
+
+    let answerButtons = [];
+    $.getJSON('/api/random', data => {
+        if(!data){
+            alert("Nothing found. Try again");
+        }
+        else{
+
+            var clue = data.q;
+            var word = data.correctAnswer.toLowerCase().replace(/[^a-zA-Z0-9]+/g, "");
+
+            game.addWord(word, function(error, clueAnchor, direction) {
+                if (error) {
+                    return;
+                }
+                var clueRef = $("<li>");
+                clueRef.append($("<strong>").text(clueAnchor));
+                clueRef.append(clue || word);
+                clueRef.append($("<small>").text(word));
+                $("#" + direction + " .list").append(clueRef);
+            });
+
+            $("#add-clue input").val("");
+        }
+
+
+
+        alertElem.hide();
+
+        clueButton.attr("disabled", false);
+        clueButton.text(clueButtonTextOriginal);
+
+
+
+    });
+});
+
 function shuffle(array) {
     var currentIndex = array.length,
         temporaryValue, randomIndex;
